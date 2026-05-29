@@ -1,0 +1,42 @@
+name: Monitor de Vagas - iNOVA Capixaba
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  monitorar_vagas:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout do código
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Instalar dependências
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r PesquisaVagasInovaCapixaba/requirements.txt
+
+    - name: Executar monitor de vagas
+      env:
+        WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+        CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+      run: |
+        cd PesquisaVagasInovaCapixaba
+        python monitor_vagas.py
+
+    - name: Salvar estado das vagas conhecidas
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "GitHub Actions Bot"
+        git add PesquisaVagasInovaCapixaba/vagas_conhecidas.json
+        git diff --staged --quiet || git commit -m "chore: atualiza vagas conhecidas [skip ci]"
+        git push
