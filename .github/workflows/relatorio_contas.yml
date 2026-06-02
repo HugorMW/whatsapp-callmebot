@@ -2,8 +2,10 @@ name: Automacao Mensal de Contas
 
 on:
   schedule:
-    # Executa todo dia 3 de cada mês às 09:00 UTC (06:00 no Brasil)
-    - cron: '0 9 3 * *'
+    # Executa TODO DIA às 09:00 UTC (06:00 no Brasil).
+    # O script decide sozinho quando enviar (quando as faturas do mês chegarem)
+    # e só envia uma vez por mês.
+    - cron: '0 9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -13,6 +15,8 @@ jobs:
     steps:
     - name: Checkout do código
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Configurar Python
       uses: actions/setup-python@v5
@@ -33,3 +37,11 @@ jobs:
       run: |
         cd RelatorioContasMes
         python script.py
+
+    - name: Salvar estado de envio (pra não repetir no mesmo mês)
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "GitHub Actions Bot"
+        git add RelatorioContasMes/estado_envio.json
+        git diff --staged --quiet || git commit -m "chore: atualiza estado de envio [skip ci]"
+        git push
