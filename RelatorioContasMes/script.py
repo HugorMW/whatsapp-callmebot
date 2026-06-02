@@ -6,6 +6,7 @@ import urllib.parse
 from urllib.parse import urljoin
 import datetime
 from datetime import date
+import time
 import imaplib
 import email
 from email.header import decode_header
@@ -388,11 +389,20 @@ def enviar_whatsapp(mensagem):
         print("Aviso: Credenciais do WhatsApp não configuradas.")
         return
     url = f"https://api.callmebot.com/whatsapp.php?phone={WHATSAPP_PHONE}&text={urllib.parse.quote(mensagem)}&apikey={CALLMEBOT_APIKEY}"
-    try:
-        r = requests.get(url, timeout=15)
-        print("WhatsApp enviado!" if r.status_code == 200 else f"Erro WhatsApp: {r.status_code}")
-    except Exception as e:
-        print(f"Erro de conexão WhatsApp: {e}")
+    for tentativa in range(3):
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code == 200:
+                print("WhatsApp enviado!")
+                break
+            else:
+                print(f"Erro WhatsApp: {r.status_code} (tentativa {tentativa+1})")
+                time.sleep(12)  # CallMeBot pediu pra esperar; tenta de novo
+        except Exception as e:
+            print(f"Erro de conexão WhatsApp: {e}")
+            time.sleep(12)
+    # pausa entre mensagens pra não bater no limite do CallMeBot
+    time.sleep(8)
 
 
 # ============================================================
