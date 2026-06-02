@@ -1,4 +1,7 @@
 requests
 beautifulsoup4
-pdf2image
-pyzbar
+pypdf
+cryptography
+pymupdf
+opencv-python-headless
+numpy
