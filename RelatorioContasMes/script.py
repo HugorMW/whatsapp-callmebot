@@ -1,5 +1,6 @@
 import os
 import requests
+import json
 from bs4 import BeautifulSoup
 import re
 import urllib.parse
@@ -42,6 +43,13 @@ CHATGPT_MINHA_PARTE = 10.00       # sua parte fixa do ChatGPT (em reais)
 # Claude.Ai: dividido igualmente entre N pessoas.
 CLAUDE_COMPARTILHADO = True       # False = Claude é só seu (não separa, fica no total da fatura)
 CLAUDE_NUM_PESSOAS = 2            # entre quantas pessoas dividir igualmente
+
+# --- Verificação diária ---
+# O script roda todo dia. Envia quando as 3 faturas de cartão do mês chegarem.
+# Rede de segurança: se até este dia faltar alguma, envia mesmo assim com o que tiver.
+DIA_LIMITE_ENVIO = 8
+CARTOES_ESPERADOS = ["Nubank", "Inter", "Viaon"]
+ARQUIVO_ESTADO_ENVIO = "estado_envio.json"
 
 # ============================================================
 #  SECRETS DO GITHUB
@@ -458,7 +466,7 @@ def enviar_relatorio(venc_energia, valor_energia, energia_extra, cartoes):
             v = c['vencimento']
             L.append(f"- {c['nome']}: {brl(c['valor'])}" + (f" (vence {v})" if v else ""))
         else:
-            L.append(f"- {c['nome']}: nao encontrada")
+            L.append(f"- {c['nome']}: ainda não chegou")
 
     # A cobrar - Inter por pessoa
     for c in cartoes:
@@ -505,12 +513,89 @@ def enviar_relatorio(venc_energia, valor_energia, energia_extra, cartoes):
 
 
 # ============================================================
+#  VERIFICAÇÃO DIÁRIA (estado + decisão)
+# ============================================================
+def vencimento_eh_do_mes(venc_str, ref):
+    """True se a data de vencimento (DD/MM ou DD/MM/AAAA) for do mês/ano de referência."""
+    if not venc_str:
+        return False
+    m = re.search(r'(\d{1,2})/(\d{2})(?:/(\d{4}))?', venc_str)
+    if not m:
+        return False
+    mes = int(m.group(2))
+    ano = int(m.group(3)) if m.group(3) else ref.year
+    return mes == ref.month and ano == ref.year
+
+
+def ja_enviado_no_mes(mes):
+    if os.path.exists(ARQUIVO_ESTADO_ENVIO):
+        try:
+            with open(ARQUIVO_ESTADO_ENVIO, 'r', encoding='utf-8') as f:
+                return json.load(f).get("ultimo_mes") == mes
+        except Exception:
+            return False
+    return False
+
+
+def marcar_enviado(mes):
+    try:
+        with open(ARQUIVO_ESTADO_ENVIO, 'w', encoding='utf-8') as f:
+            json.dump({"ultimo_mes": mes}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Aviso: não consegui salvar o estado de envio: {e}")
+
+
+# ============================================================
 #  EXECUÇÃO
 # ============================================================
 if __name__ == "__main__":
-    print("=== Relatório de Contas + Faturas ===")
+    hoje = datetime.date.today()
+    mes_atual = hoje.strftime("%Y-%m")
+    print(f"=== Verificação diária — {hoje.strftime('%d/%m/%Y')} ===")
+
+    # 1) Já enviei este mês? Então não faz nada.
+    if ja_enviado_no_mes(mes_atual):
+        print(f"Relatório de {mes_atual} já foi enviado. Nada a fazer hoje.")
+        raise SystemExit(0)
+
+    # 2) Busca energia (portal, sempre ao vivo) e as faturas de cartão (e-mail)
     venc_energia, valor_energia, energia_extra = obter_fatura_energia()
     print(f"Energia: venc={venc_energia} valor={valor_energia}")
     cartoes = obter_todas_faturas_cartao()
+
+    # 3) Marca quais faturas de cartão são do MÊS ATUAL (pelo vencimento)
+    for c in cartoes:
+        c['atual'] = (c['nome'] in CARTOES_ESPERADOS) and vencimento_eh_do_mes(c.get('vencimento'), hoje)
+
+    prontos = sum(1 for c in cartoes if c.get('atual'))
+    total = len(CARTOES_ESPERADOS)
+    tudo_pronto = (prontos == total)
+    forcar = hoje.day >= DIA_LIMITE_ENVIO
+
+    # 4) Decisão
+    if not (tudo_pronto or forcar):
+        faltam = [n for n in CARTOES_ESPERADOS
+                  if not any(c['nome'] == n and c.get('atual') for c in cartoes)]
+        print(f"Aguardando faturas de {mes_atual}: {prontos}/{total} prontas. "
+              f"Faltam: {', '.join(faltam)}. Não envia hoje.")
+        raise SystemExit(0)
+
+    if forcar and not tudo_pronto:
+        print(f"Dia {hoje.day} (limite {DIA_LIMITE_ENVIO}): enviando com {prontos}/{total} faturas.")
+    else:
+        print(f"Todas as {total} faturas do mês chegaram. Enviando relatório!")
+
+    # 5) Esconde dados de faturas que ainda não são do mês atual (evita mostrar valor antigo)
+    for c in cartoes:
+        if not c.get('atual'):
+            c['valor'] = None
+            c['pix'] = None
+            c['boleto'] = None
+            c['chatgpt'] = None
+            c['claude'] = None
+            c['analise'] = None
+
     enviar_relatorio(venc_energia, valor_energia, energia_extra, cartoes)
+    marcar_enviado(mes_atual)
+    print(f"Relatório de {mes_atual} enviado e registrado.")
     print("Concluído.")
