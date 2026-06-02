@@ -392,12 +392,30 @@ def enviar_whatsapp(mensagem):
     for tentativa in range(3):
         try:
             r = requests.get(url, timeout=20)
-            if r.status_code == 200:
-                print("WhatsApp enviado!")
+            # Limpa o HTML da resposta pra ler o texto que o CallMeBot devolve
+            resposta = re.sub(r'<[^>]+>', ' ', r.text)
+            resposta = re.sub(r'\s+', ' ', resposta).strip()
+            texto_low = resposta.lower()
+
+            # Casos de SUCESSO (mesmo que o status não seja 200)
+            if "message queued" in texto_low or "message sent" in texto_low or "sent inmediatelly" in texto_low or r.status_code == 200:
+                if "added into the queue" in texto_low or "added to a queue" in texto_low:
+                    print(f"WhatsApp na FILA do CallMeBot (limite de 16 msgs/4h atingido). Será entregue em breve.")
+                else:
+                    print("WhatsApp enviado!")
                 break
+
+            # Casos de ERRO real — mostra o motivo que o CallMeBot deu
+            print(f"Falha no WhatsApp (status {r.status_code}). Resposta do CallMeBot:")
+            print(f"   >> {resposta[:300]}")
+
+            # Erros que adianta tentar de novo (limite/fila momentânea)
+            if any(p in texto_low for p in ["queue", "limit", "too many", "wait", "try again"]):
+                print("   (parece limite/fila — aguardando pra tentar de novo)")
+                time.sleep(15)
             else:
-                print(f"Erro WhatsApp: {r.status_code} (tentativa {tentativa+1})")
-                time.sleep(12)  # CallMeBot pediu pra esperar; tenta de novo
+                # erro definitivo (apikey errada, número inválido, etc.) — não adianta repetir
+                break
         except Exception as e:
             print(f"Erro de conexão WhatsApp: {e}")
             time.sleep(12)
