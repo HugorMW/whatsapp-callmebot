@@ -10,7 +10,10 @@ import imaplib
 import email
 from email.header import decode_header
 import io
-import fitz  # PyMuPDF - renderiza PDF para imagem (sem dependência de sistema)
+try:
+    import fitz              # versões antigas
+except ImportError:
+    import pymupdf as fitz   # versões novas
 import cv2   # OpenCV - decodifica QR Code (sem dependência de sistema)
 import numpy as np
 
