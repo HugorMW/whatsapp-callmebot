@@ -11,9 +11,9 @@ import email
 from email.header import decode_header
 import io
 try:
-    import fitz              # versões antigas
+    import fitz  # PyMuPDF (versões mais antigas)
 except ImportError:
-    import pymupdf as fitz   # versões novas
+    import pymupdf as fitz  # PyMuPDF (versões novas usam 'pymupdf')
 import cv2   # OpenCV - decodifica QR Code (sem dependência de sistema)
 import numpy as np
 
@@ -398,122 +398,82 @@ def enviar_whatsapp(mensagem):
 # ============================================================
 #  RELATÓRIO
 # ============================================================
+def brl(v):
+    """Formata valor no padrão brasileiro: 1458.43 -> R$ 1.458,43"""
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def enviar_relatorio(venc_energia, valor_energia, energia_extra, cartoes):
     mes_ano = datetime.date.today().strftime("%m/%Y")
     energia_meia = valor_energia / 2
-    aluguel_total = ALUGUEL * 2
-    internet_total = INTERNET * 2
     total_estimado = ALUGUEL + INTERNET + CHAT + energia_meia
-    total_geral = aluguel_total + internet_total + valor_energia + CHAT
 
-    # MENSAGEM 1: Contas da casa (completo)
-    corpo_casa = f"""Contas de Casas {mes_ano}:
-
-Enviar para Rodolfo:
-- Aluguel: R$ {ALUGUEL:.2f}
-- Internet: R$ {INTERNET:.2f}
-- Chat: R$ {CHAT:.2f}
-- Energia (Venc.: {venc_energia}): R$ {energia_meia:.2f}
-
----------------------------------
-TOTAL ESTIMADO: R$ {total_estimado:.2f}
----------------------------------
-
-Totais das Contas:
-- Aluguel Total: R$ {aluguel_total:.2f}
-- Internet Total: R$ {internet_total:.2f}
-- Energia Total: R$ {valor_energia:.2f}
-- Chat: R$ {CHAT:.2f}
-
-TOTAL GERAL: R$ {total_geral:.2f}
----------------------------------
-"""
+    # ===== BLOCO 1: CASA (pro Rodolfo) =====
+    msg_casa = (
+        f"\U0001F3E0 Contas da Casa \u2014 {mes_ano}\n\n"
+        f"Enviar pro Rodolfo:\n"
+        f"- Aluguel: {brl(ALUGUEL)}\n"
+        f"- Internet: {brl(INTERNET)}\n"
+        f"- Chat: {brl(CHAT)}\n"
+        f"- Energia: {brl(energia_meia)} (vence {venc_energia})\n"
+        f"\u27A1\uFE0F TOTAL: {brl(total_estimado)}\n\n"
+        f"(Energia cheia: {brl(valor_energia)})"
+    )
     if energia_extra and energia_extra.get('link'):
-        corpo_casa += f"\nFatura energia:\n{energia_extra['link']}\n"
+        msg_casa += f"\n\nFatura energia:\n{energia_extra['link']}"
+    enviar_whatsapp(msg_casa)
 
-    # MENSAGEM 2: Valores diretos (Rodolfo)
-    corpo_rodolfo = f"""Aluguel: R$ {ALUGUEL:.2f}
-Internet: R$ {INTERNET:.2f}
-Chat: R$ {CHAT:.2f}
-Energia: R$ {energia_meia:.2f}"""
-
-    # MENSAGEM 3: Faturas de cartão
-    corpo_cartoes = "💳 Faturas de Cartão:\n\n"
-    total_cartoes = 0.0
+    # ===== BLOCO 2: CARTOES (totais + quem te deve) =====
+    L = [f"\U0001F4B3 Cart\u00f5es \u2014 {mes_ano}\n", "Voc\u00ea paga:"]
     for c in cartoes:
         if c['valor'] is not None:
-            corpo_cartoes += f"- {c['nome']}: R$ {c['valor']:.2f}"
-            if c['vencimento']:
-                corpo_cartoes += f" (Venc.: {c['vencimento']})"
-            corpo_cartoes += "\n"
-            total_cartoes += c['valor']
+            v = c['vencimento']
+            L.append(f"- {c['nome']}: {brl(c['valor'])}" + (f" (vence {v})" if v else ""))
         else:
-            corpo_cartoes += f"- {c['nome']}: não encontrada\n"
-    corpo_cartoes += f"\nTOTAL CARTÕES: R$ {total_cartoes:.2f}"
+            L.append(f"- {c['nome']}: nao encontrada")
 
-    enviar_whatsapp(corpo_casa)
-    enviar_whatsapp(corpo_rodolfo)
-    enviar_whatsapp(corpo_cartoes)
-
-    # MENSAGEM 4: Detalhamento do Inter (pessoas x minha parte)
+    # A cobrar - Inter por pessoa
     for c in cartoes:
         if c['nome'] == "Inter" and c.get('analise'):
             a = c['analise']
-            msg = f"💳 Inter — Total: R$ {c['valor']:.2f}"
-            if c['vencimento']:
-                msg += f" (Venc.: {c['vencimento']})"
-            msg += "\n"
-            for nome_pessoa, dados in a['por_pessoa'].items():
-                if dados['total'] > 0:
-                    msg += f"\n👤 {nome_pessoa}: R$ {dados['total']:.2f}"
-            msg += f"\n\n🧑 Minha parte: R$ {a['total_meu']:.2f}"
-            if a['itens_meus']:
-                for loja, v in a['itens_meus']:
-                    msg += f"\n   - {loja}: R$ {v:.2f}"
-            enviar_whatsapp(msg)
+            pcv = [(n, d) for n, d in a['por_pessoa'].items() if d['total'] > 0]
+            if pcv:
+                L.append("\nA cobrar (Inter):")
+                for n, d in pcv:
+                    L.append(f"- {n}: {brl(d['total'])}")
+            if a['total_meu'] > 0:
+                L.append(f"- Minha parte: {brl(a['total_meu'])}")
+                for loja, val in a['itens_meus']:
+                    L.append(f"   \u00b7 {loja}: {brl(val)}")
 
-    # MENSAGEM 5: Assinaturas compartilhadas (Nubank) — ChatGPT e Claude
+    # Assinaturas - Nubank (ChatGPT e Claude)
+    ass = []
     for c in cartoes:
         if c['nome'] != "Nubank":
             continue
-        # ChatGPT (parte fixa sua)
         if CHATGPT_COMPARTILHADO and c.get('chatgpt'):
             cg = c['chatgpt']
             resto = cg['total'] - CHATGPT_MINHA_PARTE
-            enviar_whatsapp(
-                f"🤖 ChatGPT (compartilhado) - Nubank:\n"
-                f"- Assinatura: R$ {cg['assinatura']:.2f}\n"
-                f"- IOF: R$ {cg['iof']:.2f}\n"
-                f"Total: R$ {cg['total']:.2f}\n\n"
-                f"Minha parte: R$ {CHATGPT_MINHA_PARTE:.2f}\n"
-                f"Pra dividir (resto): R$ {resto:.2f}"
-            )
-        # Claude (dividido igualmente entre N pessoas)
+            ass.append(f"- ChatGPT: total {brl(cg['total'])} \u2192 cobrar {brl(resto)} (sua parte {brl(CHATGPT_MINHA_PARTE)})")
         if CLAUDE_COMPARTILHADO and c.get('claude'):
             cl = c['claude']
             minha = cl['total'] / CLAUDE_NUM_PESSOAS if CLAUDE_NUM_PESSOAS else cl['total']
-            enviar_whatsapp(
-                f"🤖 Claude.Ai (compartilhado) - Nubank:\n"
-                f"- Assinatura: R$ {cl['assinatura']:.2f}\n"
-                f"- IOF: R$ {cl['iof']:.2f}\n"
-                f"Total: R$ {cl['total']:.2f}\n\n"
-                f"Dividido entre {CLAUDE_NUM_PESSOAS} pessoas\n"
-                f"Minha parte: R$ {minha:.2f}\n"
-                f"Cada um: R$ {minha:.2f}"
-            )
+            ass.append(f"- Claude: total {brl(cl['total'])} \u2192 voc\u00ea {brl(minha)}, cobrar {brl(cl['total']-minha)}")
+    if ass:
+        L.append("\nAssinaturas (Nubank):")
+        L.extend(ass)
+    enviar_whatsapp("\n".join(L))
 
+    # ===== BLOCO 3+: PIX / pagamentos (cada um separado pra copiar facil) =====
     if energia_extra and energia_extra.get('pix'):
-        enviar_whatsapp(f"PIX COPIA E COLA ENERGIA:\n{energia_extra['pix']}")
-
-    # Mensagens individuais com PIX / boleto de cada cartão (pra copiar fácil)
+        enviar_whatsapp(f"\U0001F511 PIX Energia:\n{energia_extra['pix']}")
     for c in cartoes:
         if c.get('pix'):
-            enviar_whatsapp(f"PIX COPIA E COLA - {c['nome']}:\n{c['pix']}")
+            enviar_whatsapp(f"\U0001F511 PIX {c['nome']}:\n{c['pix']}")
         elif c.get('boleto'):
-            enviar_whatsapp(f"BOLETO (linha digitável) - {c['nome']}:\n{c['boleto']}")
+            enviar_whatsapp(f"\U0001F511 Boleto {c['nome']}:\n{c['boleto']}")
         elif c['nome'] == "Nubank" and c['valor'] is not None and PIX_NUBANK:
-            # Nubank não traz QR; envia a chave PIX fixa junto com o valor
-            enviar_whatsapp(f"PIX NUBANK (chave):\n{PIX_NUBANK}\nValor: R$ {c['valor']:.2f}")
+            enviar_whatsapp(f"\U0001F511 PIX Nubank (chave): {PIX_NUBANK} \u2014 {brl(c['valor'])}")
 
 
 # ============================================================
