@@ -2,9 +2,9 @@ name: Automacao Mensal de Contas
 
 on:
   schedule:
-    # Executa todo dia 1 de cada mês às 09:00 AM UTC (aprox. 06:00 AM no Brasil)
-    - cron: '0 9 1 * *'
-  workflow_dispatch: # Permite rodar manualmente para testar
+    # Executa todo dia 3 de cada mês às 09:00 UTC (06:00 no Brasil)
+    - cron: '0 9 3 * *'
+  workflow_dispatch:
 
 jobs:
   processar_relatorio:
@@ -19,11 +19,6 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Instalar dependencias de sistema
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y poppler-utils libzbar0
-
     - name: Instalar bibliotecas Python
       run: |
         python -m pip install --upgrade pip
@@ -31,10 +26,10 @@ jobs:
 
     - name: Executar script de automacao
       env:
-        EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
-        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
         CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+        EMAIL_CONTAS: ${{ secrets.EMAIL_CONTAS }}
+        EMAIL_CONTAS_SENHA: ${{ secrets.EMAIL_CONTAS_SENHA }}
       run: |
         cd RelatorioContasMes
         python script.py
